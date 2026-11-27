@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MIAD</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',sans-serif}
+body{background:#0f0f1a;color:#fff;padding:16px;padding-bottom:90px}
+.top{display:flex;justify-content:space-between;align-items:center}
+.logo{font-size:22px;font-weight:900}.logo span{color:#facc15}
+.user-pill{background:#1e1e2e;padding:7px 12px;border-radius:20px;font-size:13px}
+.balance-card{background:linear-gradient(135deg,#facc15,#f97316);color:#000;border-radius:22px;padding:28px;text-align:center;margin:16px 0}
+.balance-card h1{font-size:48px}
+.balance-card p{font-weight:700;font-size:13px}
+.btn{width:100%;background:#facc15;color:#000;border:none;padding:15px;border-radius:14px;font-weight:900;cursor:pointer;margin-bottom:10px;font-size:15px}
+.btn2{width:100%;background:#1e1e2e;color:#facc15;border:1.5px solid #facc15;padding:15px;border-radius:14px;font-weight:900;cursor:pointer;margin-bottom:10px}
+.card{background:#1e1e2e;border:1px solid #2a2a3a;border-radius:18px;padding:18px;text-align:center;margin-bottom:10px;cursor:pointer}
+.card b{font-size:18px}
+.card p{font-size:12px;opacity:.6}
+input{width:100%;background:#2a2a3a;border:none;color:#fff;padding:14px;border-radius:12px;margin-bottom:10px;outline:none}
+.nav{position:fixed;bottom:0;left:0;right:0;background:#161622;border-top:1px solid #2a2a3a;display:flex;padding:10px}
+.nav button{flex:1;background:none;border:none;color:#888;font-size:12px;font-weight:700}
+.nav button.active{color:#facc15}
+.nav button i{font-size:20px;display:block;font-style:normal}
+.hidden{display:none}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#22c55e;padding:10px 18px;border-radius:20px;font-weight:700;font-size:13px;display:none;z-index:999}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+<div class="top"><div class="logo">MIAD<span> •</span></div><div class="user-pill" id="userName">👤 User</div></div>
+
+<div id="page-home">
+  <div class="balance-card"><small>💰 BALANCE</small><h1 id="balance">0</h1><p>MIAD • <span id="usdt">0.0000 USDT</span></p></div>
+  <button class="btn" onclick="showWithdraw()">💸 WITHDRAW</button>
+  <button class="btn2" onclick="doCheckin()">✅ DAILY CHECK-IN</button>
+  <div id="withdrawBox" class="hidden" style="background:#1e1e2e;padding:16px;border-radius:18px;margin-top:10px">
+    <b>Withdraw</b>
+    <p style="font-size:12px;opacity:.7;margin:8px 0;line-height:1.6">Min Withdraw: 10000 MIAD (0.10 USDT)<br>Fee: 0.01 USDT (1 Cent)<br>You Get: 0.09 USDT<br>Network: TON</p>
+    <input id="tonAddr" placeholder="Your TON Address">
+    <input id="wAmt" type="number" placeholder="Amount - 10000">
+    <button class="btn" onclick="doWithdraw()">CONFIRM WITHDRAW</button>
+  </div>
+</div>
+
+<div id="page-game" class="hidden">
+  <div class="card" onclick="play('coin')"><b>🪙 Coin Flip</b></div>
+  <div class="card" onclick="play('dice')"><b>🎲 Dice</b></div>
+  <div class="card" onclick="play('mines')"><b>💣 Mines</b></div>
+</div>
+
+<div id="page-refer" class="hidden">
+  <div class="balance-card"><small>👥 REFER</small><h1 style="font-size:32px">50 MIAD</h1><p>Per Refer</p></div>
+  <input id="refLink" readonly value="https://t.me/MIADBot?start=123">
+  <button class="btn" onclick="copyRef()">COPY LINK</button>
+  <p style="font-size:12px;opacity:.7;text-align:center;margin-top:10px">7 Days Check-in + 10 Ads = Reward</p>
+</div>
+
+<div id="page-deposit" class="hidden">
+  <div class="balance-card"><small>💳 MANUAL DEPOSIT</small><h1 style="font-size:32px">TON</h1><p>Min: 0.10 USDT</p></div>
+  <div style="background:#7f1d1d;border:1px solid #ef4444;padding:12px;border-radius:14px;margin-bottom:14px">
+    <b style="color:#fca5a5">⚠️ WARNING - Read Carefully!</b>
+    <p style="font-size:12px;line-height:1.6;margin-top:6px;color:#fecaca">
+    1. If you enter a wrong Amount, your deposit will be lost.<br>
+    2. Without Deposit Screenshot, your deposit will NOT be approved.<br>
+    3. If your Telegram ID / Comment is wrong, we cannot find your payment and your deposit will be lost.
+    </p>
+  </div>
+  <p style="font-size:13px;margin-bottom:8px">Step 1: Send TON To This Address</p>
+  <input readonly id="depositAddr" value="UQC9h4yYcYsJIXEQ3QD8lbY_2dX4r_SQmotjAUE1McwOrIF3" onclick="this.select()">
+  <button class="btn2" onclick="copyDepositAddr()">📋 COPY ADDRESS</button>
+  <p style="font-size:13px;margin:14px 0 8px">Step 2: Fill This Form</p>
+  <p style="font-size:12px;opacity:.7;margin-bottom:6px">Enter Amount (USDT)</p>
+  <input id="depAmt" type="number" placeholder="Example: 1.00">
+  <p style="font-size:12px;opacity:.7;margin-bottom:6px">Comment Your TG ID For Approval</p>
+  <input id="depTgId" placeholder="Example: @miad_123 / 123456789">
+  <p style="font-size:12px;opacity:.7;margin-bottom:6px">Submit Screenshot Of Deposit</p>
+  <input id="depShot" type="file" accept="image/*" style="padding:10px;background:#1e1e2e">
+  <div id="previewBox" class="hidden" style="margin-bottom:10px">
+    <img id="shotPreview" style="width:100%;border-radius:14px;border:1px solid #2a2a3a">
+    <p style="font-size:11px;color:#22c55e;text-align:center;margin-top:6px">✅ Screenshot Selected</p>
+  </div>
+  <button class="btn" onclick="doDeposit()">SUBMIT DEPOSIT</button>
+  <p style="font-size:11px;opacity:.6;text-align:center">Admin will check Screenshot + TG ID and approve within 24h.<br>After Submit, Send Screenshot in Bot Chat.</p>
+</div>
+
+<div class="nav">
+  <button class="active" onclick="showPage('home',this)"><i>🏠</i>Home</button>
+  <button onclick="showPage('game',this)"><i>🎮</i>Game</button>
+  <button onclick="showPage('refer',this)"><i>👥</i>Refer</button>
+  <button onclick="showPage('deposit',this)"><i>💳</i>Deposit</button>
+</div>
+
+<script>
+let tg = window.Telegram.WebApp; tg.expand(); tg.ready();
+let user = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+if(user){
+  document.getElementById('userName').innerText = "👤 @" + (user.username || user.first_name);
+  document.getElementById('depTgId').value = "@" + (user.username || user.id);
+  document.getElementById('refLink').value = "https://t.me/MIADBot?start=" + user.id;
+}
+function toast(m){let t=document.getElementById('toast');t.innerText=m;t.style.display='block';setTimeout(()=>t.style.display='none',2500)}
+function showPage(p,b){document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');['home','game','refer','deposit'].forEach(x=>document.getElementById('page-'+x).classList.add('hidden'));document.getElementById('page-'+p).classList.remove('hidden')}
+function showWithdraw(){document.getElementById('withdrawBox').classList.toggle('hidden')}
+function doCheckin(){toast("Check-in Done! Use Bot /start for Check-in"); }
+function play(g){toast(g + " - Play In Bot")}
+function copyRef(){document.getElementById('refLink').select();document.execCommand('copy');toast("Link Copied!")}
+function doWithdraw(){
+  let addr=document.getElementById('tonAddr').value;
+  let a=parseInt(document.getElementById('wAmt').value);
+  if(!addr){toast("Enter TON Address!");return}
+  if(!a||a<10000){toast("Min 10000 MIAD Required!");return}
+  try{ tg.sendData("withdraw_"+a+"_"+addr); }catch(e){}
+  toast("Withdraw Request Sent! Fee 0.01 USDT");
+}
+function copyDepositAddr(){let inp=document.getElementById('depositAddr');inp.select();document.execCommand('copy');toast("Address Copied!")}
+document.getElementById('depShot').addEventListener('change', function(e){
+  let file = e.target.files[0];
+  if(file){
+    let reader = new FileReader();
+    reader.onload = function(ev){
+      document.getElementById('shotPreview').src = ev.target.result;
+      document.getElementById('previewBox').classList.remove('hidden');
+    }
+    reader.readAsDataURL(file);
+  }
+});
+function doDeposit(){
+  let amt=document.getElementById('depAmt').value;
+  let tgId=document.getElementById('depTgId').value;
+  let shot=document.getElementById('depShot').files[0];
+  if(!amt){toast("Please Enter Amount!");return}
+  if(parseFloat(amt) < 0.10){toast("Min 0.10 USDT!");return}
+  if(!tgId){toast("Please Enter Your TG ID!");return}
+  if(!shot){toast("Please Upload Deposit Screenshot!");return}
+  let cleanTgId = tgId.replace(/_/g, "-");
+  tg.sendData("deposit_"+amt+"_"+cleanTgId);
+  toast("Deposit Request Sent! Now Send Screenshot in Bot Chat");
+}
+</script>
+</body>
+</html>
