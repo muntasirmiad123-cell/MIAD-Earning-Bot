@@ -1,6 +1,5 @@
 # MIAD BOT - FINAL SAFE VERSION - GITHUB READY
 # pip install python-telegram-bot pymongo
-
 import os
 import random
 from datetime import datetime, date
@@ -9,15 +8,15 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 # ================= SECRET - GITHUB E KHALI THAKBE =================
-# Asol link Render er Environment Variables e bosabi
 MONGO_URI = os.getenv("MONGO_URI")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # <-- Render e tor Telegram ID bosabi
 client = MongoClient(MONGO_URI)
 db = client["miad_bot"]
 users = db["users"]
+deposits = db["deposits"]  # NEW - Deposit er jonno
 
-# ================= PUBLIC - ADS ID - GITHUB E DITE PARBI =================
+# ================= PUBLIC - ADS ID =================
 ADSGRAM_BLOCK_ID = "PAST YOUR ADSGRAM CODE HERE"
 MONETAG_ZONE_ID = "PAST YOUR MONETAG CODE HERE"
 MONETAG_LINK = "PAST YOUR MONETAG LINK HERE"
@@ -33,6 +32,7 @@ WITHDRAW_FEE_PERCENT = 10
 COIN_PAYOUT = 1.92
 DICE_PAYOUT = 5.0
 COIN_WIN_PROB = 0.48
+ADMIN_WALLET = "UQC9h4yYcYsJIXEQ3QD8lbY_2dX4r_SQmotjAUE1McwOrIF3"
 
 # ================= HELPERS =================
 def get_user(user_id, username=""):
@@ -40,12 +40,29 @@ def get_user(user_id, username=""):
     today_str = str(date.today())
     if not user:
         user = {
-            "user_id": user_id, "username": username, "balance": 0,
-            "adsgram_today": 0, "monetag_today": 0, "last_reset_date": today_str,
-            "checkin_days": 0, "last_checkin": "", "checkin_history": [],
-            "refer_count": 0, "refer_earned": 0, "referred_by": None, "refer_rewarded": False,
-            "total_ads_watched": 0, "game_history": [], "withdraw_history": [],
-            "state": None, "temp_bet": 0, "temp_game": None, "temp_mines": None, "ton_address": ""
+            "user_id": user_id,
+            "username": username,
+            "balance": 0,
+            "adsgram_today": 0,
+            "monetag_today": 0,
+            "last_reset_date": today_str,
+            "checkin_days": 0,
+            "last_checkin": "",
+            "checkin_history": [],
+            "refer_count": 0,
+            "refer_earned": 0,
+            "referred_by": None,
+            "refer_rewarded": False,
+            "total_ads_watched": 0,
+            "game_history": [],
+            "withdraw_history": [],
+            "deposit_history": [],  # NEW
+            "is_banned": False,  # NEW - Ban er jonno
+            "state": None,
+            "temp_bet": 0,
+            "temp_game": None,
+            "temp_mines": None,
+            "ton_address": ""
         }
         users.insert_one(user)
         return user
@@ -57,6 +74,10 @@ def get_user(user_id, username=""):
 
 def update_user(user_id, data):
     users.update_one({"user_id": user_id}, {"$set": data})
+
+def is_banned_check(user_id):
+    u = users.find_one({"user_id": user_id})
+    return u and u.get("is_banned", False)
 
 def main_menu():
     return InlineKeyboardMarkup([
@@ -78,13 +99,16 @@ def check_refer_reward(user):
             ref = users.find_one({"user_id": referrer_id})
             if ref:
                 users.update_one({"user_id": referrer_id}, {"$inc": {"balance": REFER_REWARD, "refer_count": 1, "refer_earned": REFER_REWARD}})
-                users.update_one({"user_id": user["user_id"]}, {"$set": {"refer_rewarded": True}})
-                return True
+            users.update_one({"user_id": user["user_id"]}, {"$set": {"refer_rewarded": True}})
+            return True
     return False
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    if is_banned_check(user.id):
+        await update.message.reply_text("🚫 You Are Banned From MIAD Bot. Contact Admin.")
+        return
     existing = users.find_one({"user_id": user.id})
     if context.args and not existing:
         try:
@@ -130,7 +154,6 @@ async def give_ad_reward(query, user_id, ad_type):
         if u["adsgram_today"] >= DAILY_AD_LIMIT:
             await query.answer("Today's Adsgram limit is over!", show_alert=True)
             return
-        # ADSGRAM VERIFY HERE - Use ADSGRAM_BLOCK_ID
         new_bal = u["balance"] + ADSGRAM_REWARD
         update_user(user_id, {"balance": new_bal, "adsgram_today": u["adsgram_today"]+1, "total_ads_watched": u["total_ads_watched"]+1})
         check_refer_reward(get_user(user_id))
@@ -139,7 +162,6 @@ async def give_ad_reward(query, user_id, ad_type):
         if u["monetag_today"] >= DAILY_AD_LIMIT:
             await query.answer("Today's Monetag limit is over!", show_alert=True)
             return
-        # MONETAG VERIFY HERE - Use MONETAG_ZONE_ID / MONETAG_LINK
         new_bal = u["balance"] + MONETAG_REWARD
         update_user(user_id, {"balance": new_bal, "monetag_today": u["monetag_today"]+1, "total_ads_watched": u["total_ads_watched"]+1})
         check_refer_reward(get_user(user_id))
@@ -210,10 +232,7 @@ async def play_mines_start(query, user_id, bet):
         return
     mines = random.sample(range(9), 3)
     update_user(user_id, {"temp_mines": {"mines": mines, "revealed": [], "bet": bet, "multiplier": 1.0}})
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(3)],
-                               [InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(3,6)],
-                               [InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(6,9)],
-                               [InlineKeyboardButton("Cashout", callback_data="mine_cashout")]])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(3)], [InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(3,6)], [InlineKeyboardButton("?", callback_data=f"mine_{i}") for i in range(6,9)], [InlineKeyboardButton("Cashout", callback_data="mine_cashout")]])
     await query.edit_message_text(f"Mines - Bet: {bet} MIAD\n\nOpen safe tiles, multiplier will increase. If you hit a mine, you lose everything!", reply_markup=kb)
 
 async def withdraw_menu(query, user_id):
@@ -225,8 +244,11 @@ async def withdraw_menu(query, user_id):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if is_banned_check(user_id):
+        await update.message.reply_text("🚫 You Are Banned From MIAD Bot.")
+        return
     u = get_user(user_id)
-    text = update.message.text.strip()
+    text = update.message.text.strip() if update.message.text else ""
     if u.get("state") == "waiting_ton":
         update_user(user_id, {"ton_address": text, "state": "waiting_amount"})
         await update.message.reply_text(f"TON Address Saved: {text}\n\nNow how much MIAD do you want to withdraw? Type number (Min 10000):")
@@ -246,8 +268,235 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_bal = u["balance"] - amt
             update_user(user_id, {"balance": new_bal, "state": None, "withdraw_history": u["withdraw_history"] + [{"amount": amt, "fee": fee, "net": net_miad, "address": u["ton_address"], "date": str(datetime.now())}]})
             await update.message.reply_text(f"Withdraw Request Done!\n\nWithdraw: {amt} MIAD\nFee (10%): {fee} MIAD\nYou Will Get: {net_miad} MIAD = {net_usdt:.4f} USDT\nAddress: {u['ton_address']}\n\nAdmin will send within 24h.", reply_markup=main_menu())
+            # NEW - Admin ke withdraw notify
+            if ADMIN_ID:
+                await context.bot.send_message(ADMIN_ID, f"💸 NEW WITHDRAW\n\nUser: {user_id} (@{update.effective_user.username})\nAmount: {amt} MIAD\nFee: {fee}\nNet: {net_miad} MIAD ({net_usdt:.4f} USDT)\nAddress: {u['ton_address']}")
         except:
             await update.message.reply_text("Please type only number!")
+        return
+
+# ================= NEW - DEPOSIT FROM WEB APP =================
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_message.web_app_data:
+        return
+    data = update.effective_message.web_app_data.data
+    user_id = update.effective_user.id
+    if is_banned_check(user_id):
+        await update.effective_message.reply_text("🚫 You Are Banned From MIAD Bot.")
+        return
+    if data.startswith("deposit_"):
+        try:
+            _, amt_str, tg_id = data.split("_", 2)
+            amount_usdt = float(amt_str)
+        except:
+            await update.effective_message.reply_text("Invalid Deposit Data. Try Again.")
+            return
+        miad_amount = int(amount_usdt * RATE_MIAD_PER_USDT)
+        dep_id = deposits.insert_one({
+            "user_id": user_id,
+            "username": update.effective_user.username or "",
+            "amount_usdt": amount_usdt,
+            "miad_amount": miad_amount,
+            "tg_id": tg_id,
+            "screenshot_id": None,
+            "status": "waiting_screenshot",
+            "created_at": str(datetime.now())
+        }).inserted_id
+        update_user(user_id, {"state": "waiting_deposit_screenshot", "temp_bet": 0})
+        # Save dep id in user temp for photo handler
+        users.update_one({"user_id": user_id}, {"$set": {"temp_game": str(dep_id)}})
+        await update.effective_message.reply_text(
+            f"✅ Deposit Request Received!\n\nAmount: {amount_usdt} USDT\nYou Will Get: {miad_amount} MIAD\nTG ID: {tg_id}\n\n📸 Now Send Deposit Screenshot Here.\nWithout Screenshot it will NOT be approved."
+        )
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if is_banned_check(user_id):
+        return
+    u = get_user(user_id)
+    if u.get("state") != "waiting_deposit_screenshot":
+        return
+    photo_id = update.effective_message.photo[-1].file_id
+    dep_id_str = u.get("temp_game")
+    try:
+        from bson import ObjectId
+        dep = deposits.find_one({"_id": ObjectId(dep_id_str)})
+    except:
+        dep = None
+    if not dep:
+        # Fallback - last pending deposit
+        dep = deposits.find_one({"user_id": user_id, "status": "waiting_screenshot"}, sort=[("_id", -1)])
+    if not dep:
+        return
+    deposits.update_one({"_id": dep["_id"]}, {"$set": {"screenshot_id": photo_id, "status": "pending"}})
+    update_user(user_id, {"state": None, "temp_game": None})
+    await update.message.reply_text("Screenshot Received! Admin will approve within 24h.")
+    if ADMIN_ID:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Approve", callback_data=f"dep_approve_{dep['_id']}"), InlineKeyboardButton("❌ Reject", callback_data=f"dep_reject_{dep['_id']}")],
+            [InlineKeyboardButton("🚫 Ban User", callback_data=f"ban_{user_id}")]
+        ])
+        await context.bot.send_photo(
+            ADMIN_ID, photo=photo_id,
+            caption=f"📸 NEW DEPOSIT\n\nUser: {user_id} (@{update.effective_user.username})\nAmount: {dep['amount_usdt']} USDT\nMIAD: {dep['miad_amount']}\nTG ID: {dep['tg_id']}\nDeposit ID: {dep['_id']}",
+            reply_markup=kb
+        )
+
+# ================= NEW - ADMIN PANEL + BAN =================
+def admin_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Stats", callback_data="admin_stats")],
+        [InlineKeyboardButton("💳 Pending Deposits", callback_data="admin_deps")],
+        [InlineKeyboardButton("💸 Pending Withdraws", callback_data="admin_wds")],
+        [InlineKeyboardButton("🚫 Banned Users", callback_data="admin_banned")],
+        [InlineKeyboardButton("🔍 Search / Ban User", callback_data="admin_search")],
+    ])
+
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("You are not Admin!")
+        return
+    await update.message.reply_text("👑 ADMIN PANEL - MIAD\n\nSelect Option:", reply_markup=admin_menu_kb())
+
+async def ban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Use: /ban USER_ID")
+        return
+    try:
+        target_id = int(context.args[0])
+    except:
+        await update.message.reply_text("Invalid ID")
+        return
+    users.update_one({"user_id": target_id}, {"$set": {"is_banned": True}}, upsert=True)
+    await update.message.reply_text(f"🚫 User {target_id} Banned!")
+    try:
+        await context.bot.send_message(target_id, "🚫 You Are Banned From MIAD Bot. Contact Admin.")
+    except:
+        pass
+
+async def unban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Use: /unban USER_ID")
+        return
+    target_id = int(context.args[0])
+    users.update_one({"user_id": target_id}, {"$set": {"is_banned": False}})
+    await update.message.reply_text(f"✅ User {target_id} Unbanned!")
+    try:
+        await context.bot.send_message(target_id, "✅ You Are Unbanned. Welcome Back!")
+    except:
+        pass
+
+async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if query.from_user.id != ADMIN_ID:
+        await query.answer("Not Admin!", show_alert=True)
+        return
+
+    # --- Deposit Approve / Reject ---
+    if data.startswith("dep_approve_"):
+        dep_id = data.replace("dep_approve_", "")
+        try:
+            from bson import ObjectId
+            dep = deposits.find_one({"_id": ObjectId(dep_id)})
+        except:
+            dep = None
+        if not dep or dep.get("status") == "approved":
+            await query.answer("Already processed!", show_alert=True)
+            return
+        deposits.update_one({"_id": dep["_id"]}, {"$set": {"status": "approved"}})
+        users.update_one({"user_id": dep["user_id"]}, {"$inc": {"balance": dep["miad_amount"]}})
+        await query.edit_message_caption(caption=(query.message.caption or "") + "\n\n✅ APPROVED")
+        try:
+            await context.bot.send_message(dep["user_id"], f"✅ Your Deposit Approved! {dep['miad_amount']} MIAD Added. Amount: {dep['amount_usdt']} USDT")
+        except:
+            pass
+        return
+
+    if data.startswith("dep_reject_"):
+        dep_id = data.replace("dep_reject_", "")
+        try:
+            from bson import ObjectId
+            dep = deposits.find_one({"_id": ObjectId(dep_id)})
+        except:
+            dep = None
+        if not dep:
+            return
+        deposits.update_one({"_id": dep["_id"]}, {"$set": {"status": "rejected"}})
+        await query.edit_message_caption(caption=(query.message.caption or "") + "\n\n❌ REJECTED")
+        try:
+            await context.bot.send_message(dep["user_id"], "❌ Your Deposit Rejected. Contact Admin.")
+        except:
+            pass
+        return
+
+    # --- Ban / Unban from button ---
+    if data.startswith("ban_"):
+        target_id = int(data.split("_")[1])
+        users.update_one({"user_id": target_id}, {"$set": {"is_banned": True}}, upsert=True)
+        await query.answer("User Banned!")
+        try:
+            await context.bot.send_message(target_id, "🚫 You Are Banned From MIAD Bot.")
+        except:
+            pass
+        await query.edit_message_text(f"🚫 User {target_id} Banned!", reply_markup=admin_menu_kb())
+        return
+
+    if data.startswith("unban_"):
+        target_id = int(data.split("_")[1])
+        users.update_one({"user_id": target_id}, {"$set": {"is_banned": False}})
+        await query.answer("User Unbanned!")
+        await query.edit_message_text(f"✅ User {target_id} Unbanned!", reply_markup=admin_menu_kb())
+        return
+
+    # --- Admin Menu ---
+    if data == "admin_stats":
+        total_users = users.count_documents({})
+        total_dep = sum([d.get("amount_usdt", 0) for d in deposits.find({"status": "approved"})])
+        pending_dep = deposits.count_documents({"status": "pending"})
+        banned = users.count_documents({"is_banned": True})
+        await query.edit_message_text(
+            f"📊 STATS\n\nTotal Users: {total_users}\nTotal Deposit Approved: {total_dep} USDT\nPending Deposit: {pending_dep}\nBanned Users: {banned}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]])
+        )
+        return
+    if data == "admin_deps":
+        pending = list(deposits.find({"status": "pending"}).limit(10))
+        if not pending:
+            await query.edit_message_text("💳 No Pending Deposits", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+            return
+        text = "💳 Pending Deposits:\n\n"
+        for d in pending:
+            text += f"ID: {d['_id']} | User: {d['user_id']} | {d['amount_usdt']} USDT | TG: {d['tg_id']}\n"
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+        return
+    if data == "admin_wds":
+        # Withdraw history theke pending dekhano - tor ager withdraw system e status chilo na, tai list dekhabo
+        await query.edit_message_text("💸 Check Withdraw Requests in Bot Chat / DB.\nWithdraw history is in users collection.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+        return
+    if data == "admin_banned":
+        banned_users = list(users.find({"is_banned": True}).limit(10))
+        if not banned_users:
+            await query.edit_message_text("No Banned Users", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+            return
+        kb = []
+        text = "🚫 Banned Users:\n\n"
+        for u in banned_users:
+            text += f"{u['user_id']} - @{u.get('username','')}\n"
+            kb.append([InlineKeyboardButton(f"✅ Unban {u['user_id']}", callback_data=f"unban_{u['user_id']}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="admin_back")])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
+        return
+    if data == "admin_search":
+        await query.edit_message_text("🔍 Search / Ban User\n\nBan: /ban USER_ID\nUnban: /unban USER_ID\n\nExample: /ban 123456789", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+        return
+    if data == "admin_back":
+        await query.edit_message_text("👑 ADMIN PANEL - MIAD\n\nSelect Option:", reply_markup=admin_menu_kb())
         return
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -255,8 +504,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     user_id = query.from_user.id
+    if is_banned_check(user_id):
+        await query.answer("🚫 You Are Banned!", show_alert=True)
+        return
     bot_username = context.bot.username
-
     if data == "back":
         await query.edit_message_text("Menu:", reply_markup=main_menu())
     elif data == "balance":
@@ -307,7 +558,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 m["revealed"].append(idx)
                 m["multiplier"] += 0.4
                 update_user(user_id, {"temp_mines": m})
-                await query.answer(f"Safe! Multiplier: {m['multiplier']:.2f}x", show_alert=True)
+            await query.answer(f"Safe! Multiplier: {m['multiplier']:.2f}x", show_alert=True)
     elif data == "mine_cashout":
         u = get_user(user_id)
         m = u.get("temp_mines")
@@ -321,7 +572,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    # NEW - Admin
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(CommandHandler("ban", ban_cmd))
+    app.add_handler(CommandHandler("unban", unban_cmd))
+    app.add_handler(CallbackQueryHandler(on_admin_callback, pattern="^(admin_|dep_|ban_|unban_)"))
     app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("MIAD Bot Running...")
     app.run_polling()
